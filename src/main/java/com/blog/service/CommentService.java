@@ -1,5 +1,7 @@
 package com.blog.service;
 
+import com.blog.config.RabbitMQConfig;
+import com.blog.dto.message.CommentNotificationMessage;
 import com.blog.dto.request.CommentRequest;
 import com.blog.dto.response.CommentResponse;
 import com.blog.dto.response.PageResponse;
@@ -11,6 +13,7 @@ import com.blog.repository.CommentRepository;
 import com.blog.repository.PostRepository;
 import com.blog.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.AccessDeniedException;
@@ -23,6 +26,7 @@ public class CommentService {
     private final CommentRepository commentRepository;
     private final PostRepository postRepository;
     private final UserRepository userRepository;
+    private final RabbitTemplate rabbitTemplate;
 
     public CommentResponse addComment(Long postId, CommentRequest commentRequest, String username) {
         Post post = postRepository.findById(postId).orElseThrow(() -> new ResourceNotFoundException("Post not found"));
@@ -32,6 +36,16 @@ public class CommentService {
         comment.setPost(post);
         comment.setAuthor(user);
         Comment save = commentRepository.save(comment);
+        if (!post.getAuthor().getUsername().equals(username)) {
+            CommentNotificationMessage message = new CommentNotificationMessage(
+                    post.getId(), save.getId(), username, post.getAuthor().getId()
+            );
+            rabbitTemplate.convertAndSend(
+                    RabbitMQConfig.COMMENT_EXCHANGE,
+                    RabbitMQConfig.COMMENT_ROUTING_KEY,
+                    message
+            );
+        }
         return new CommentResponse(save);
     }
 
